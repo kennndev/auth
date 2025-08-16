@@ -13,7 +13,7 @@ const admin = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-// ---- Stripe (platform/marketplace account) ----
+// ---- Stripe (your marketplace/platform account) ----
 const stripe = getStripeServer("market")
 
 /* ───────────────── helpers ───────────────── */
@@ -69,8 +69,8 @@ async function transferAssetToBuyer(listingId: string, buyerId: string) {
       .from("user_assets")
       .update({ owner_id: buyerId })
       .eq("id", listing.source_id)
-    if (upErr) console.error("[wh] transferAsset(asset) err:", upErr.message)
-    else console.log("[wh] transferAsset(asset) OK", listing.source_id, "→", buyerId)
+    if (upErr) console.error("[wh] transferAsset (asset) err:", upErr.message)
+    else console.log("[wh] transferAsset (asset) OK", listing.source_id, "→", buyerId)
     return
   }
 
@@ -81,9 +81,11 @@ async function transferAssetToBuyer(listingId: string, buyerId: string) {
     .eq("source_type", "uploaded_image")
     .eq("source_id", listing.source_id)
 
-  if (upErr2) console.error("[wh] transferAsset(uploaded_image) err:", upErr2.message)
-  else console.log("[wh] transferAsset(uploaded_image) OK", listing.source_id, "→", buyerId)
+  if (upErr2) console.error("[wh] transferAsset (uploaded_image) err:", upErr2.message)
+  else console.log("[wh] transferAsset (uploaded_image) OK", listing.source_id, "→", buyerId)
 }
+
+
 
 async function queuePayoutIfPossible(
   listingId: string,
@@ -104,7 +106,7 @@ async function queuePayoutIfPossible(
   }
   if (!seller?.stripe_account_id) return
 
-  const when = new Date(Date.now() + 10 * 60 * 1000) // demo
+  const when = new Date(Date.now() + 10 * 60 * 1000) // T+10 min (demo)
   const { error: payoutErr } = await admin.from("mkt_payouts").insert({
     listing_id: listingId,
     stripe_account_id: seller.stripe_account_id,
@@ -117,36 +119,27 @@ async function queuePayoutIfPossible(
   else console.log("[wh] payout queued:", listingId, netCents)
 }
 
-/* ---- transaction status helpers ---- */
-
+// 1) extra helpers
 async function markTxFailed(stripeId: string, listingId?: string, buyerId?: string) {
+  // mark tx failed
   await admin
     .from("mkt_transactions")
     .update({ status: "failed", updated_at: new Date().toISOString() })
     .eq("stripe_payment_id", stripeId)
 
+  // put listing back to active if we pessimistically reserved it
   if (listingId) {
-    let q = admin
+    await admin
       .from("mkt_listings")
-      .update({
-        buyer_id: null,
-        status: "active",
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ buyer_id: null, status: "active", is_active: true, updated_at: new Date().toISOString() })
       .eq("id", listingId)
-
-    if (buyerId) q = q.eq("buyer_id", buyerId)
-    else q = q.is("buyer_id", null) // IMPORTANT: SQL NULL check
-
-    await q
+      .eq("buyer_id", buyerId ?? null) // only if we had set this buyer
   }
 }
 
-/* ---- event handlers ---- */
-
+// 2) succeed handler: VERIFY then transfer
 async function handlePaymentIntentSucceeded(pi: Stripe.PaymentIntent) {
-  // Re-fetch to ensure final status/amounts
+  // Always re-fetch to be 100% sure and to get the latest captured amounts
   const fresh = await stripe.paymentIntents.retrieve(pi.id)
   if (fresh.status !== "succeeded") {
     console.warn("[wh] PI not succeeded after refetch →", fresh.status)
@@ -155,8 +148,8 @@ async function handlePaymentIntentSucceeded(pi: Stripe.PaymentIntent) {
 
   const md = (fresh.metadata ?? {}) as any
   const listingId = md.mkt_listing_id as string | undefined
-  const buyerId = md.mkt_buyer_id as string | undefined
-  const sellerId = md.mkt_seller_id as string | undefined
+  const buyerId   = md.mkt_buyer_id   as string | undefined
+  const sellerId  = md.mkt_seller_id  as string | undefined
   if (!listingId || !buyerId) {
     console.warn("[wh] PI missing metadata", { listingId, buyerId, md })
     return
@@ -167,13 +160,12 @@ async function handlePaymentIntentSucceeded(pi: Stripe.PaymentIntent) {
   const platformFeeCents = Number(fresh.application_fee_amount ?? 0)
   const netCents = Math.max(0, amountCents - platformFeeCents)
 
-  // 1) complete transaction
+  // 1) complete transaction (by stripe id, else fallback)
   const { data: tx1, error: tx1Err } = await admin
     .from("mkt_transactions")
     .update({ status: "completed", updated_at: new Date().toISOString() })
     .eq("stripe_payment_id", stripeId)
     .select("id")
-
   if (tx1Err) console.error("[wh] tx by stripe_id error:", tx1Err.message)
 
   if (!tx1?.length) {
@@ -209,27 +201,25 @@ async function handlePaymentIntentSucceeded(pi: Stripe.PaymentIntent) {
   await queuePayoutIfPossible(listingId, sellerId, netCents)
 }
 
+// 3) NEW: failure/void/refund handlers → mark failed & unlock listing
 async function handlePaymentIntentFailed(pi: Stripe.PaymentIntent) {
   const md = (pi.metadata ?? {}) as any
   await markTxFailed(pi.id, md.mkt_listing_id, md.mkt_buyer_id)
 }
 
 async function handleChargeRefunded(ch: Stripe.Charge) {
+  // optional: treat refund as a failure after the fact (if you want to re-open the listing)
   const piId = typeof ch.payment_intent === "string" ? ch.payment_intent : ch.payment_intent?.id
   await markTxFailed(piId ?? "")
 }
 
-/* ───────────────── route ───────────────── */
-
+// 4) route switch: add failure cases
 export async function POST(req: NextRequest) {
   const rawBody = Buffer.from(await req.arrayBuffer())
   const sig = req.headers.get("stripe-signature") ?? ""
-
   const primary = process.env.STRIPE_WEBHOOK_SECRET
   const connect = process.env.STRIPE_CONNECT_WEBHOOK_SECRET
-  if (!primary && !connect) {
-    return new NextResponse("webhook secret missing", { status: 500 })
-  }
+  if (!primary && !connect) return new NextResponse("webhook secret missing", { status: 500 })
 
   let event: Stripe.Event
   try {
@@ -251,45 +241,33 @@ export async function POST(req: NextRequest) {
         await handlePaymentIntentSucceeded(event.data.object as Stripe.PaymentIntent)
         break
 
-      // Async payment methods via Checkout (optional but recommended)
-      case "checkout.session.async_payment_succeeded": {
-        const s = event.data.object as Stripe.Checkout.Session
-        const piId =
-          typeof s.payment_intent === "string"
-            ? s.payment_intent
-            : s.payment_intent?.id
-        if (piId) {
-          const pi = await stripe.paymentIntents.retrieve(piId)
-          await handlePaymentIntentSucceeded(pi)
-        }
-        break
-      }
-
       // FAILURE / NO-TRANSFER paths
       case "payment_intent.payment_failed":
       case "payment_intent.canceled":
         await handlePaymentIntentFailed(event.data.object as Stripe.PaymentIntent)
         break
 
-      case "checkout.session.async_payment_failed": {
-        const s = event.data.object as Stripe.Checkout.Session
-        const md = (s.metadata ?? {}) as any
-        await markTxFailed(
-          typeof s.payment_intent === "string"
-            ? s.payment_intent
-            : s.payment_intent?.id ?? s.id,
-          md?.mkt_listing_id,
-          md?.mkt_buyer_id
-        )
+      // If you use async payment methods via Checkout:
+      case "checkout.session.async_payment_failed":
+        {
+          const s = event.data.object as Stripe.Checkout.Session
+          const md = (s.metadata ?? {}) as any
+          await markTxFailed(
+            typeof s.payment_intent === "string"
+              ? s.payment_intent
+              : s.payment_intent?.id ?? s.id,
+            md?.mkt_listing_id,
+            md?.mkt_buyer_id
+          )
+        }
         break
-      }
 
-      // Optional: refunds → mark returned (policy dependent)
+      // Optional: refunds → mark failed/returned (your policy)
       case "charge.refunded":
         await handleChargeRefunded(event.data.object as Stripe.Charge)
         break
 
-      // Seller onboarding status
+      // Seller onboarding status (unchanged)
       case "account.updated":
       case "capability.updated":
       case "account.application.authorized":
@@ -305,3 +283,4 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ received: true })
 }
+
