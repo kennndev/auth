@@ -19,76 +19,60 @@ function admin() {
 async function grantCredits(session: Stripe.Checkout.Session) {
   const a = admin()
   const md = (session.metadata ?? {}) as Record<string, string | undefined>
-
   if (md.kind !== "credits_purchase") return
 
   const userId = md.userId
   const credits = parseInt(md.credits ?? "0", 10)
   const amount_cents = session.amount_total ?? 0
-
   const piId =
     typeof session.payment_intent === "string"
       ? session.payment_intent
       : (session.payment_intent as Stripe.PaymentIntent | undefined)?.id || session.id
 
   console.log("[credits] payload", { userId, credits, piId })
+  if (!userId || !credits || credits <= 0 || !piId) return
 
-  if (!userId || !credits || credits <= 0 || !piId) {
-    console.warn("[credits] invalid metadata", { userId, credits, piId, md })
-    return
-  }
-
-  // 1) Idempotent ledger insert (require a unique index on payment_intent)
-  const { error: ledgerErr } = await a
-    .from("credits_ledger")
-    .insert({
-      user_id: userId,
-      payment_intent: piId,
-      amount_cents,
-      credits,
-      reason: "purchase",
-    })
+  // 1) Idempotent ledger insert (ensure unique index on payment_intent)
+  const { error: ledgerErr } = await a.from("credits_ledger").insert({
+    user_id: userId,
+    payment_intent: piId,
+    amount_cents,
+    credits,
+    reason: "purchase",
+  })
   if (ledgerErr && (ledgerErr as any).code !== "23505") {
     console.error("[credits] ledger insert error:", ledgerErr.message)
     return
   }
+  if (!ledgerErr) console.log("[credits] ledger insert ok")
 
-  // 2) Increment profile credits (RPC preferred), fallback to upsert
-  const { error: rpcErr } = await a.rpc("increment_profile_credits", {
-    p_user_id: userId,
-    p_delta: credits,
-  })
-  if (rpcErr) {
-    console.warn("[credits] RPC missing/failed, fallback:", rpcErr.message)
+  // 2) ALWAYS increment mkt_profiles.credits (no RPC)
+  const { data: prof, error: readErr } = await a
+    .from("mkt_profiles")
+    .select("credits")
+    .eq("id", userId)
+    .single()
 
-    const { data: prof, error: readErr } = await a
-      .from("mkt_profiles")
-      .select("credits")
-      .eq("id", userId)
-      .single()
-
-    if (readErr) {
-      const { error: upsertNewErr } = await a
-        .from("mkt_profiles")
-        .upsert({ id: userId, credits }, { onConflict: "id" })
-      if (upsertNewErr) {
-        console.error("[credits] upsert new profile failed:", upsertNewErr.message)
-        return
-      }
-    } else {
-      const current = Number(prof?.credits ?? 0)
-      const { error: upsertErr } = await a
-        .from("mkt_profiles")
-        .upsert({ id: userId, credits: current + credits }, { onConflict: "id" })
-      if (upsertErr) {
-        console.error("[credits] balance upsert failed:", upsertErr.message)
-        return
-      }
-    }
+  if (readErr && readErr.code !== "PGRST116") {
+    console.error("[credits] profile read failed:", readErr.message)
+    return
   }
 
-  console.log("[credits] granted", { userId, credits, payment_intent: piId })
+  const current = Number(prof?.credits ?? 0)
+  const next = current + credits
+
+  const { error: upErr } = await a
+    .from("mkt_profiles")
+    .upsert({ id: userId, credits: next }, { onConflict: "id" })
+
+  if (upErr) {
+    console.error("[credits] profile upsert failed:", upErr.message)
+    return
+  }
+
+  console.log("[credits] granted", { userId, credits, payment_intent: piId, newBalance: next })
 }
+
 
 export async function POST(req: NextRequest) {
   const raw = Buffer.from(await req.arrayBuffer())
