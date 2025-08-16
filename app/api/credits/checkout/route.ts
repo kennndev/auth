@@ -13,7 +13,7 @@ function siteUrl(path = "") {
   const base =
     process.env.NEXT_PUBLIC_SITE_URL ||
     process.env.SITE_URL ||
-    "http://localhost:3000"
+    "https://auth-coral-eight-31.vercel.app"
   return `${base}${path}`
 }
 
