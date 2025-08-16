@@ -1,0 +1,404 @@
+{
+  "name": "Cardify Stripe to Easyship (Complete)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "cca3b0e4-7b87-4428-95f0-71fedd555b82",
+      "name": "Every 12 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "customer",
+        "operation": "getAll",
+        "limit": 100,
+        "filters": {}
+      },
+      "id": "d44d112a-7d86-4ea2-80be-ae5ebd1305a7",
+      "name": "Get Stripe Customers",
+      "type": "n8n-nodes-base.stripe",
+      "typeVersion": 1,
+      "position": [
+        16,
+        0
+      ],
+      "credentials": {
+        "stripeApi": {
+          "id": "E7DlhPCKbVT4jRE3",
+          "name": "Stripe Cardify"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.shipping?.address?.line1}}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "a947a311-aae4-4015-ba13-41d3c112bf6b",
+      "name": "Has Shipping Address?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "c78b74f7-2644-4617-99b2-aafa53ff79b3",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        608,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.stripe.com/v1/checkout/sessions?customer={{$json.id}}&limit=1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c74b1685-3633-473c-af55-05f5736982fc",
+      "name": "Get Customer Checkout Sessions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        768,
+        0
+      ],
+      "credentials": {
+        "stripeApi": {
+          "id": "E7DlhPCKbVT4jRE3",
+          "name": "Stripe Cardify"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.data[0].status }}",
+              "value2": "complete"
+            },
+            {
+              "value1": "={{ $json.data[0].payment_status }}",
+              "value2": "paid"
+            },
+            {
+              "value1": "={{ $json.data[0].collected_information.shipping_details }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "d4032ce4-c446-4b91-ab5b-b88f99961fe1",
+      "name": "Filter Paid & Complete Sessions",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://public-api.easyship.com/2024-09/shipments",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ \n  // Determine if this is a cart checkout or single item checkout\n  const metadata = $json.data[0].metadata;\n  const isCartCheckout = metadata.isCartCheckout === 'true';\n  \n  // Initialize variables for quantities and types\n  let cardQuantity = 0;\n  let displayCaseQuantity = 0;\n  let isCustomCard = false;\n  let cardFinish = 'matte';\n  let customImageUrl = '';\n  let description = '';\n  \n  if (isCartCheckout) {\n    // Cart checkout - loop through items\n    for (let i = 0; i < 10; i++) {\n      const itemType = metadata[`item${i}_type`];\n      const itemQty = parseInt(metadata[`item${i}_quantity`] || 0);\n      \n      if (!itemType) break; // No more items\n      \n      if (itemType === 'custom-card') {\n        cardQuantity += itemQty;\n        isCustomCard = true;\n        cardFinish = metadata[`item${i}_finish`] || 'matte';\n        customImageUrl = metadata[`item${i}_imageUrl`] || '';\n      } else if (itemType === 'limited-edition') {\n        cardQuantity += itemQty;\n      } else if (itemType === 'display-case') {\n        displayCaseQuantity += itemQty;\n      }\n    }\n  } else {\n    // Single item checkout - use direct metadata fields\n    cardQuantity = parseInt(metadata.quantity || 1);\n    displayCaseQuantity = parseInt(metadata.displayCaseQuantity || 0);\n    isCustomCard = metadata.isCustomCard === 'true';\n    cardFinish = metadata.cardFinish || 'matte';\n    customImageUrl = metadata.customImageUrl || '';\n  }\n  \n  // Build the description\n  const cardType = isCustomCard ? 'Custom Cards' : 'Limited Edition Cards';\n  description = `${cardType} (${cardQuantity})`;\n  \n  if (cardFinish && cardFinish !== 'matte' && isCustomCard) {\n    description += ` - ${cardFinish} finish`;\n  }\n  \n  if (displayCaseQuantity > 0) {\n    description += ` + Display Case (${displayCaseQuantity})`;\n  }\n  \n  if (customImageUrl) {\n    const imageName = customImageUrl.split('/').pop().substring(0, 20);\n    description += ` [IMG: ${imageName}]`;\n  }\n  \n  // Calculate weight\n  const totalWeight = 0.1 * cardQuantity + 0.05 * displayCaseQuantity;\n  \n  // Return the complete payload\n  return {\n    \"origin_address\": {\n      \"line_1\": \"3070 N Garehime St\",\n      \"city\": \"Las Vegas\",\n      \"state\": \"NV\",\n      \"postal_code\": \"89108\",\n      \"country_alpha2\": \"US\",\n      \"contact_name\": \"Cardify LLC\",\n      \"contact_phone\": \"+17604022716\",\n      \"contact_email\": \"shipping@cardify.com\",\n      \"company_name\": \"Cardify LLC\"\n    },\n    \"destination_address\": {\n      \"line_1\": $json.data[0].collected_information.shipping_details.address.line1,\n      \"line_2\": $json.data[0].collected_information.shipping_details.address.line2,\n      \"city\": $json.data[0].collected_information.shipping_details.address.city,\n      \"state\": $json.data[0].collected_information.shipping_details.address.state,\n      \"postal_code\": $json.data[0].collected_information.shipping_details.address.postal_code,\n      \"country_alpha2\": $json.data[0].collected_information.shipping_details.address.country,\n      \"contact_name\": $json.data[0].collected_information.shipping_details.name,\n      \"contact_email\": $json.data[0].customer_details.email,\n      \"contact_phone\": $json.data[0].customer_details.phone || '+10000000000'\n    },\n    \"incoterms\": \"DDU\",\n    \"insurance\": {\n      \"is_insured\": false\n    },\n    \"shipping_settings\": {\n      \"units\": {\n        \"weight\": \"kg\",\n        \"dimensions\": \"cm\"\n      }\n    },\n    \"parcels\": [\n      {\n        \"total_actual_weight\": totalWeight,\n        \"items\": [\n          {\n            \"description\": description,\n            \"quantity\": 1,\n            \"actual_weight\": totalWeight,\n            \"dimensions\": {\n              \"length\": 20,\n              \"width\": 15,\n              \"height\": 10\n            },\n            \"declared_customs_value\": parseFloat($json.data[0].amount_total) / 100 - 4.99,\n            \"declared_currency\": \"USD\",\n            \"hs_code\": \"9504.40.00\",\n            \"origin_country_alpha2\": \"US\"\n          }\n        ]\n      }\n    ]\n  };\n}}",
+        "options": {}
+      },
+      "id": "d7f8e03c-2ed9-4c47-aa9a-b74b54174f29",
+      "name": "Create Easyship Shipment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1536,
+        -16
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "FK8S0X2KblKdy8FB",
+          "name": "Cardify Easyship"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "boolean": [
+            {
+              "name": "success",
+              "value": true
+            }
+          ],
+          "string": [
+            {
+              "name": "easyship_shipment_id",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "customer_email",
+              "value": "={{ $('Get Customer Checkout Sessions').item.json.data[0].customer_details.email }}"
+            },
+            {
+              "name": "shipping_to",
+              "value": "={{ $('Get Customer Checkout Sessions').item.json.data[0].collected_information.shipping_details.address.city + ', ' + $('Get Customer Checkout Sessions').item.json.data[0].collected_information.shipping_details.address.state }}"
+            },
+            {
+              "name": "session_id",
+              "value": "={{ $('Get Customer Checkout Sessions').item.json.data[0].id }}"
+            },
+            {
+              "name": "order_details",
+              "value": "={{ (() => {\n  const metadata = $('Get Customer Checkout Sessions').item.json.data[0].metadata;\n  const isCartCheckout = metadata.isCartCheckout === 'true';\n  \n  let details = '';\n  \n  if (isCartCheckout) {\n    // Cart checkout\n    for (let i = 0; i < 10; i++) {\n      const itemType = metadata[`item${i}_type`];\n      if (!itemType) break;\n      \n      details += `Item ${i}: ${itemType}`;\n      if (metadata[`item${i}_quantity`]) details += ` x${metadata[`item${i}_quantity`]}`;\n      if (metadata[`item${i}_finish`]) details += ` (${metadata[`item${i}_finish`]})`;\n      if (metadata[`item${i}_imageUrl`]) details += ` [Custom]`;\n      details += '; ';\n    }\n  } else {\n    // Single item\n    const isCustom = metadata.isCustomCard === 'true';\n    details = isCustom ? 'Custom Card' : 'Limited Edition';\n    if (metadata.quantity) details += ` x${metadata.quantity}`;\n    if (metadata.cardFinish) details += ` (${metadata.cardFinish})`;\n    if (metadata.includeDisplayCase === 'true') {\n      details += ` + Display Case x${metadata.displayCaseQuantity || 1}`;\n    }\n  }\n  \n  return details;\n})() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d150fff0-03a7-47d3-a3b8-fe36547a3b93",
+      "name": "Record Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [
+        1808,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 0.2,
+        "unit": "seconds"
+      },
+      "id": "08b1a85f-8497-41eb-9d80-7d15666b8887",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        0
+      ],
+      "webhookId": "dd641d2b-3140-4e48-bcc7-3f0a8bf154d3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2862b91e-5054-4297-bf68-6fd2b7d4d762",
+              "leftValue": "={{ $json.data[0].metadata.timestamp }}",
+              "rightValue": "={{ new Date().toISOString().split('T')[0] }}T00:00:00 ",
+              "operator": {
+                "type": "dateTime",
+                "operation": "afterOrEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        976,
+        0
+      ],
+      "id": "9ee6e719-f868-406a-9550-b1763bc2fb6c",
+      "name": "Is today"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every 12 hours": {
+      "main": [
+        [
+          {
+            "node": "Get Stripe Customers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Stripe Customers": {
+      "main": [
+        [
+          {
+            "node": "Has Shipping Address?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Shipping Address?": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Get Customer Checkout Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Customer Checkout Sessions": {
+      "main": [
+        [
+          {
+            "node": "Is today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Paid & Complete Sessions": {
+      "main": [
+        [
+          {
+            "node": "Create Easyship Shipment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Easyship Shipment": {
+      "main": [
+        [
+          {
+            "node": "Record Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Success": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is today": {
+      "main": [
+        [
+          {
+            "node": "Filter Paid & Complete Sessions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "497b93fd-fde5-4c36-849c-46047c1c2e9a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "371c8147e44b400e16b33026186eeb347eefdf09870524cd03f4e638cf9242b1"
+  },
+  "id": "zdfexIcAjZxbEmc4",
+  "tags": []
+}

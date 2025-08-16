@@ -1,0 +1,172 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+---
+description: Documentation of the project directory structure, important files, and architectural patterns for the Cardify trading card platform
+globs: **/*
+alwaysApply: false
+---
+
+# Project Structure Guide
+
+This rule documents the directory structure and important files for the Cardify trading card creation platform built with Next.js, Tailwind CSS, and modern React patterns.
+
+## Root Directory Structure
+
+```
+cardify/
+├── .cursor/                    # Cursor IDE configuration
+│   └── rules/                  # Cursor rules for code consistency
+├── .next/                      # Next.js build output (auto-generated)
+├── app/                        # Next.js App Router (main application)
+├── components/                 # React components
+├── hooks/                      # Custom React hooks
+├── lib/                        # Utility libraries and functions
+├── node_modules/               # Dependencies (auto-generated)
+├── public/                     # Static assets
+├── scripts/                    # Build and development scripts
+├── styles/                     # Global stylesheets
+├── package.json               # Project dependencies and scripts
+├── tailwind.config.ts         # Tailwind CSS configuration
+├── tsconfig.json              # TypeScript configuration
+├── next.config.mjs            # Next.js configuration
+└── postcss.config.mjs         # PostCSS configuration
+```
+
+## App Router Structure (`app/`)
+
+Next.js 13+ App Router with route-based file organization:
+
+```
+app/
+├── page.tsx                   # Homepage (/)
+├── layout.tsx                 # Root layout component
+├── globals.css                # Global styles and Tailwind imports
+├── card-path/
+│   └── page.tsx              # Card path route (/card-path)
+├── create/
+│   └── page.tsx              # Card creation route (/create)
+├── gallery/
+│   ├── page.tsx              # Gallery route (/gallery)
+│   └── loading.tsx           # Loading UI for gallery
+├── quick-card/
+│   └── page.tsx              # Quick card creation (/quick-card)
+└── upload/
+    └── page.tsx              # Upload route (/upload)
+```
+
+### Key App Router Files:
+- **`layout.tsx`**: Root layout with navigation and theme providers
+- **`page.tsx`**: Main landing page with hero section
+- **`globals.css`**: Global styles, Tailwind imports, and custom CSS variables
+
+## Components Architecture (`components/`)
+
+Organized into custom components and UI library:
+
+```
+components/
+├── auth-modal.tsx             # Authentication modal component
+├── card-preview.tsx           # Static card preview component
+├── flippable-card-preview.tsx # Interactive card with flip animation
+├── navigation.tsx             # Main navigation component
+├── prompt-suggestion-chip.tsx # AI prompt suggestion chips
+├── scene-option-card.tsx      # Scene selection cards
+├── theme-provider.tsx         # Dark/light theme context
+├── upload-area.tsx            # File upload component
+└── ui/                        # Shadcn/UI component library
+    ├── accordion.tsx          # Accordion component
+    ├── alert-dialog.tsx       # Alert dialog modals
+    ├── button.tsx             # Button variants
+    ├── card.tsx               # Card container component
+    ├── dialog.tsx             # Modal dialogs
+    ├── input.tsx              # Form inputs
+    ├── tabs.tsx               # Tab navigation
+    └── [40+ other UI components]
+```
+
+### Component Categories:
+- **Custom Components**: Business logic components for Cardify platform
+- **UI Components**: Reusable shadcn/ui components for consistent design
+- **Layout Components**: Navigation, theme providers, and structural elements
+
+## Hooks Directory (`hooks/`)
+
+Custom React hooks for shared functionality:
+
+```
+hooks/
+├── use-mobile.tsx             # Mobile device detection
+├── use-navigation-visibility.ts # Navigation show/hide behavior
+└── use-toast.ts               # Toast notification system
+```
+
+## Utilities (`lib/`)
+
+```
+lib/
+└── utils.ts                   # Utility functions (cn, clsx helper)
+```
+
+## Public Assets (`public/`)
+
+Static files served directly:
+
+```
+public/
+├── card_back_1.webp          # Default card back image
+├── placeholder-logo.png       # Placeholder branding
+├── placeholder-logo.svg       # Vector logo placeholder
+├── placeholder-user.jpg       # User avatar placeholder
+├── placeholder.jpg            # General image placeholder
+├── placeholder.svg            # Vector placeholder
+└── tcgmeta-io_logo.png       # Main Cardify brand logo
+```
+
+## Configuration Files
+
+### Essential Configuration:
+- **`package.json`**: Dependencies, scripts, and project metadata
+- **`tailwind.config.ts`**: Tailwind CSS customization and theme
+- **`tsconfig.json`**: TypeScript compiler configuration
+- **`next.config.mjs`**: Next.js build and runtime configuration
+- **`components.json`**: Shadcn/ui component configuration
+
+## Architecture Patterns
+
+### File Organization Principles:
+1. **Route-based organization**: App router follows URL structure
+2. **Component separation**: Custom vs. UI library components
+3. **Hook extraction**: Shared logic in custom hooks
+4. **Asset optimization**: WebP images for performance
+5. **Type safety**: Full TypeScript implementation
+
+### Naming Conventions:
+- **Files**: kebab-case for routes, PascalCase for components
+- **Components**: Descriptive names reflecting functionality
+- **Hooks**: Prefixed with `use-` following React conventions
+- **Assets**: Descriptive names with web-optimized formats
+
+### Code Organization:
+- **Page components**: Large files (200-500 lines) handling full routes
+- **Utility components**: Smaller, focused components (50-150 lines)
+- **Hooks**: Extracted shared logic and state management
+- **Styles**: Global styles in `globals.css`, component styles via Tailwind
+
+## Development Workflow
+
+### Key Development Files:
+- **Hot reload**: Next.js development server with fast refresh
+- **Style development**: Tailwind CSS with JIT compilation
+- **Type checking**: TypeScript strict mode enabled
+- **Component development**: Shadcn/ui for consistent design system
+
+### Build Process:
+- **Production build**: `.next/` directory (auto-generated)
+- **Static assets**: Optimized and served from `public/`
+- **Code splitting**: Automatic with Next.js App Router
+- **Type checking**: Build-time TypeScript validation
+
+Follow the established patterns when adding new routes, components, or features to maintain consistency across the codebase.

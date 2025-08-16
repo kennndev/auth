@@ -1,0 +1,59 @@
+{
+  "mcpServers": {
+    "supabase-mine": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "sbp_fe1b8e4c09062e29a36469cbb2581f46ef24f699"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest"
+      ]
+    },
+    "magicuidesign": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@magicuidesign/mcp@latest"
+      ]
+    },
+    "exa": {
+      "command": "npx",
+      "args": [
+        "exa-mcp-server",
+        "--tools=web_search_exa,crawling_exa,company_research_exa,linkedin_search_exa,deep_researcher_start,deep_researcher_check"
+      ],
+      "env": {
+        "EXA_API_KEY": "75821270-f92e-4630-a71c-7e469e4eb326"
+      }
+    },
+    "Ref": {
+      "type": "http",
+      "url": "https://api.ref.tools/mcp?apiKey=ref-bb6a93a759a6656eacd4"
+    },
+    "semgrep": {
+      "command": "/Library/Frameworks/Python.framework/Versions/3.13/bin/semgrep-mcp",
+      "args": [],
+      "env": {
+        "SEMGREP_APP_TOKEN": "f56088f5a47a877e0d4275f7dac71e25ecbaaf030cb5833df3d86094b8475aeb"
+      }
+    },
+    "stripe-cardify": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@stripe/mcp",
+        "--tools=all"
+      ],
+      "env": {
+        "STRIPE_SECRET_KEY": "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"
+      }
+    }
+  }
+}

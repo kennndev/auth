@@ -1,0 +1,25 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/Users/steve/cardify/logs/.fcd42ea88d54d20a362ba0f0bb384bb71fb98c5a-audit.json",
+    "files": [
+        {
+            "date": 1753167925211,
+            "name": "/Users/steve/cardify/logs/mcp-puppeteer-2025-07-22.log",
+            "hash": "a751f8267682ee9f85c99f55067a313977512136cc78fbe374670691fd549121"
+        },
+        {
+            "date": 1753454945875,
+            "name": "/Users/steve/cardify/logs/mcp-puppeteer-2025-07-25.log",
+            "hash": "91f3d319b29dbdfd58d63025fe46d52cf7faa78d4891802592d66b38140a3810"
+        },
+        {
+            "date": 1753617290474,
+            "name": "/Users/steve/cardify/logs/mcp-puppeteer-2025-07-27.log",
+            "hash": "ff5640f9d81e1edf03e716399249c8b472191bd050358eba9b9c11986fdfd6f6"
+        }
+    ],
+    "hashType": "sha256"
+}
