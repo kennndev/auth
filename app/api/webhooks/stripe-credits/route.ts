@@ -32,29 +32,46 @@ async function grantCredits(session: Stripe.Checkout.Session) {
   console.log("[credits] payload", { userId, credits, piId })
   if (!userId || !credits || credits <= 0 || !piId) return
 
-  // 1) Idempotent ledger insert (ensure unique index on payment_intent)
-  const { error: ledgerErr } = await a.from("credits_ledger").insert({
-    user_id: userId,
-    payment_intent: piId,
-    amount_cents,
-    credits,
-    reason: "purchase",
-  })
-  if (ledgerErr && (ledgerErr as any).code !== "23505") {
-    console.error("[credits] ledger insert error:", ledgerErr.message)
+  // 1) Try to write the ledger. If it's a duplicate (23505), we STOP here.
+  const { data: ledgerData, error: ledgerErr } = await a
+    .from("credits_ledger")
+    .insert({
+      user_id: userId,
+      payment_intent: piId,
+      amount_cents,
+      credits,
+      reason: "purchase",
+    })
+    .select("payment_intent") // returns row only on success
+
+  if (ledgerErr) {
+    if ((ledgerErr as any).code === "23505") {
+      // Duplicate PI → credits already granted earlier; do nothing.
+      console.log("[credits] duplicate payment_intent; skipping increment", { piId })
+      return
+    }
+    console.error("[credits] ledger insert error:", ledgerErr)
     return
   }
-  if (!ledgerErr) console.log("[credits] ledger insert ok")
 
-  // 2) ALWAYS increment mkt_profiles.credits (no RPC)
+  if (!ledgerData || ledgerData.length === 0) {
+    // Safety: if nothing returned, don't risk double increment.
+    console.warn("[credits] ledger insert returned no rows; skipping increment")
+    return
+  }
+
+  console.log("[credits] ledger insert ok", { piId })
+
+  // 2) Increment mkt_profiles.credits (no RPC). Only runs when ledger insert succeeded.
   const { data: prof, error: readErr } = await a
     .from("mkt_profiles")
     .select("credits")
     .eq("id", userId)
     .single()
 
-  if (readErr && readErr.code !== "PGRST116") {
-    console.error("[credits] profile read failed:", readErr.message)
+  // PGRST116 = row not found (first-time user is fine)
+  if (readErr && (readErr as any).code !== "PGRST116") {
+    console.error("[credits] profile read failed:", readErr)
     return
   }
 
@@ -66,21 +83,19 @@ async function grantCredits(session: Stripe.Checkout.Session) {
     .upsert({ id: userId, credits: next }, { onConflict: "id" })
 
   if (upErr) {
-    console.error("[credits] profile upsert failed:", upErr.message)
+    console.error("[credits] profile upsert failed:", upErr)
     return
   }
 
   console.log("[credits] granted", { userId, credits, payment_intent: piId, newBalance: next })
 }
 
-
 export async function POST(req: NextRequest) {
   const raw = Buffer.from(await req.arrayBuffer())
   const sig = req.headers.get("stripe-signature") ?? ""
 
-  // Dedicated secrets for this endpoint
-  const primary = process.env.STRIPE_CREDITS_WEBHOOK_SECRET      // platform events
-  const connect = process.env.STRIPE_CREDITS_CONNECT_SECRET      // connected events
+  const primary = process.env.STRIPE_CREDITS_WEBHOOK_SECRET
+  const connect = process.env.STRIPE_CREDITS_WEBHOOK_SECRET
 
   console.log("[credits] env", {
     hasServiceKey: !!process.env.SUPABASE_SERVICE_KEY,
@@ -104,17 +119,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const ack = NextResponse.json({ received: true })
+  // Do the work synchronously, then ACK (Stripe allows ~10s).
+  if (event?.type === "checkout.session.completed") {
+    await grantCredits(event.data.object as Stripe.Checkout.Session)
+  }
 
-  queueMicrotask(async () => {
-    try {
-      if (event?.type === "checkout.session.completed") {
-        await grantCredits(event.data.object as Stripe.Checkout.Session)
-      }
-    } catch (err) {
-      console.error("[credits] handler error:", err)
-    }
-  })
-
-  return ack
+  return NextResponse.json({ received: true })
 }
